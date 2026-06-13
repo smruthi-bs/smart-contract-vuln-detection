@@ -8,7 +8,7 @@ Course project for *Interdisciplinary Deep Learning on Graphs* (UE23AM342BA1), P
 
 ## Overview
 
-Smart contracts are immutable once deployed, so vulnerabilities can't be patched after the fact — they have to be caught before deployment. This project frames vulnerability detection as node classification on a graph: each function in a contract is a node, edges capture both function-call relationships and shared state-variable dependencies, and the model learns which nodes correspond to vulnerable functions across 6 vulnerability categories (reentrancy, unchecked low-level calls, time manipulation, bad randomness, access control, denial of service).
+Smart contracts are immutable once deployed, so vulnerabilities can't be patched later, rather they have to be caught before deployment. This project frames vulnerability detection as node classification on a graph: each function in a contract is a node, edges capture both function-call relationships and shared state-variable dependencies, and the model learns which nodes correspond to vulnerable functions across 6 vulnerability categories (reentrancy, unchecked low-level calls, time manipulation, bad randomness, access control, denial of service).
 
 ## What's different from prior work (e.g. BugSweeper)
 

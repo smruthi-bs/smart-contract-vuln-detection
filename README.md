@@ -1,6 +1,6 @@
 # GNN-Based Function-Level Vulnerability Detection in Smart Contracts
 
-A graph neural network pipeline that detects vulnerable functions in Solidity smart contracts. Contracts are represented as function-level graphs combining call relationships and a novel state-flow edge type, and a GraphSAGE model is trained to flag risky functions — with uncertainty estimates and source-line explanations to support manual audit.
+A graph neural network pipeline that detects vulnerable functions in Solidity smart contracts. Contracts are represented as function-level graphs combining call relationships and a novel state-flow edge type, and a GraphSAGE model is trained to flag risky functions with uncertainty estimates and source-line explanations to support manual audit.
 
 Course project for *Interdisciplinary Deep Learning on Graphs* (UE23AM342BA1), PES University.
 
@@ -12,7 +12,7 @@ Smart contracts are immutable once deployed, so vulnerabilities can't be patched
 
 ## What's different from prior work (e.g. BugSweeper)
 
-- **State-flow edges**: alongside standard call edges, a second edge type captures shared state-variable read/write dependencies between functions — not present in prior graph-based approaches. In ablation, adding state-flow edges improved F1 by +0.509 (0.694 vs. 0.185 on curated-only training), confirming this signal carries real vulnerability information beyond call structure alone.
+- **State-flow edges**: alongside standard call edges, a second edge type captures shared state-variable read/write dependencies between functions which is not present in prior graph-based approaches. In ablation, adding state-flow edges improved F1 by +0.509 (0.694 vs. 0.185 on curated-only training), confirming this signal carries real vulnerability information beyond call structure alone.
 - **MC Dropout uncertainty estimation**: rather than a single binary prediction, the model runs 30 stochastic forward passes per function to produce a per-function confidence score, letting auditors prioritize uncertain flags.
 - **Source-line explainability**: GNNExplainer importance scores are mapped back to exact Solidity line numbers, producing a human-readable vulnerability heatmap rather than a function-level black-box verdict.
 
@@ -51,15 +51,15 @@ Smart contracts are immutable once deployed, so vulnerabilities can't be patched
 Key findings:
 - Focal loss (gamma=3.0) improves recall by +27.8% over weighted cross-entropy (0.629 vs. 0.492, averaged across 5 seeds).
 - State-flow edges contribute a +0.509 F1 delta in the curated ablation (0.694 vs. 0.185).
-- MC Dropout (30 forward passes) produces per-function uncertainty scores (mean approx. 0.114), with higher uncertainty observed for vulnerable nodes — useful for audit prioritization.
-- GNNExplainer identifies vars_read, sends_ether, and ext_calls as the top vulnerability signals, and shows that state-flow edges (the novel edge type) are frequently flagged as critical for reentrancy/access-control vulnerabilities — validating the new edge type.
+- MC Dropout (30 forward passes) produces per-function uncertainty scores (mean approx. 0.114), with higher uncertainty observed for vulnerable nodes. This is useful for audit prioritization.
+- GNNExplainer identifies vars_read, sends_ether, and ext_calls as the top vulnerability signals, and shows that state-flow edges (the novel edge type) are frequently flagged as critical for reentrancy/access-control vulnerabilities; validating the new edge type.
 
 ## Known Limitations
 
 - Slither-based pseudo-labels are noisy and can introduce mislabeling in the Wild training set.
 - Many Wild contracts use deprecated Solidity pragma versions that Slither cannot parse, limiting dataset coverage.
 - The ~15:1 class imbalance means a strong overall F1 can still mask low recall on rarer vulnerability classes (e.g., bad randomness).
-- MC Dropout uncertainty scores are not calibrated — it's unclear whether high-uncertainty predictions correspond to genuinely ambiguous code.
+- MC Dropout uncertainty scores are not calibrated, so it's unclear whether high-uncertainty predictions correspond to genuinely ambiguous code.
 - Generalization to vulnerability patterns not covered by Slither's detectors (e.g., logic bugs, oracle manipulation) remains untested.
 
 ## Tech Stack

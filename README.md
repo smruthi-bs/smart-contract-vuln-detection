@@ -7,7 +7,7 @@
 
 Official implementation of our research work, **GNN-Based Function-Level Vulnerability Detection in Smart Contracts**, accepted and presented at the **8th International Conference on Communication and Intelligent Systems (ICCIS 2026)**.
 
-**Authors:** Smruthi B.S., Subashri V., Bhaskarjyoti Das
+**Authors:** Smruthi B S, Subashri V, Bhaskarjyoti Das
 
 ---
 

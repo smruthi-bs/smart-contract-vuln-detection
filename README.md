@@ -1,6 +1,6 @@
 # Graph-Based Smart Contract Vulnerability Detection
 
-[![ICCIS 2026](https://img.shields.io/badge/ICCIS-2026%20Accepted%20%26%20Presented-blue)](https://www.iccisconf.com/)
+[![ICCIS 2026](https://img.shields.io/badge/ICCIS-2026%20Accepted%20%26%20Presented-blue)](https://www.scrs.in/conference/iccis2026)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-orange.svg)](https://pytorch.org/)
 [![PyTorch Geometric](https://img.shields.io/badge/PyTorch%20Geometric-GNN-orange.svg)](https://pytorch-geometric.readthedocs.io/)
@@ -148,9 +148,7 @@ Dataset preparation and preprocessing are implemented within the research notebo
 
 ### Model Performance
 
-The proposed approach achieves a reported five-seed average F1-score of:
-
-**0.605 ± 0.115**
+The proposed approach achieves a reported five-seed average F1-score of: **0.605 ± 0.115**
 
 The reported Slither baseline F1-score is 0.500 on the full Curated benchmark set.
 
@@ -322,8 +320,8 @@ The notebook contains the complete implementation, including:
 This research work was accepted and presented at the **8th International Conference on Communication and Intelligent Systems (ICCIS 2026)**.
 
 **Authors:**
-- Smruthi B.S.
-- Subashri V.
+- Smruthi B S
+- Subashri V
 - Bhaskarjyoti Das
 
 ### Publication Details

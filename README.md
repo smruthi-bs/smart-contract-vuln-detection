@@ -187,7 +187,7 @@ The conference proceedings are scheduled to be published in **Springer's Lecture
 
 ### Presented Paper
 
-The accepted and presented version of the research paper is available in the paper/ directory.
+The accepted and presented version of the research paper is available in the [`paper/`](paper/) directory.
 
 The final published version and official citation details will be updated once the conference proceedings are released.
 

@@ -1,11 +1,6 @@
-# Graph-Based Smart Contract Vulnerability Detection
+# GNN-Based Function-Level Vulnerability Detection in Smart Contracts
 
-[![ICCIS 2026](https://img.shields.io/badge/ICCIS-2026%20Accepted%20%26%20Presented-blue)](https://www.scrs.in/conference/iccis2026)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-orange.svg)](https://pytorch.org/)
-[![PyTorch Geometric](https://img.shields.io/badge/PyTorch%20Geometric-GNN-orange.svg)](https://pytorch-geometric.readthedocs.io/)
-
-Official implementation of our research work, **GNN-Based Function-Level Vulnerability Detection in Smart Contracts**, accepted and presented at the **8th International Conference on Communication and Intelligent Systems (ICCIS 2026)**.
+A graph neural network pipeline for detecting vulnerable functions in Solidity smart contracts. Each contract is represented as a function-level graph with inter-function call edges and state-flow edges that connect functions sharing on-chain state dependencies. A GraphSAGE model performs function-level vulnerability classification, with MC Dropout uncertainty estimates and GNNExplainer-based source-line explanations to support security auditing.
 
 **Authors:** Smruthi B S, Subashri V, Bhaskarjyoti Das
 
@@ -30,178 +25,102 @@ The framework additionally incorporates uncertainty estimation and explainabilit
 
 ## Key Contributions
 
-- **Graph-Based Representation:** Converts Solidity smart contracts into program graphs using function-level representations.
-- **Heterogeneous Relationships:** Integrates function-call and state-flow edges to capture structural and data dependencies.
-- **Graph Neural Networks:** Implements Graph Convolutional Networks (GCN) and GraphSAGE for vulnerability classification.
-- **Class Imbalance Handling:** Uses focal loss and class-weighted training to address imbalanced vulnerability labels.
-- **Hard-Negative Fine-Tuning:** Incorporates hard-negative examples to improve classification performance.
-- **Uncertainty Estimation:** Implements Monte Carlo Dropout (MC Dropout) to estimate predictive uncertainty.
-- **Explainable AI:** Uses GNNExplainer to identify influential node features and graph edges.
-- **Source-Code Attribution:** Generates source-line heatmaps to visualize the relationship between model explanations and Solidity code.
-- **Experimental Evaluation:** Includes multi-seed experiments, ablation studies, baseline comparisons, and statistical analysis.
+- **Function-level graph representation:** models Solidity contracts as graphs whose nodes represent functions.
+- **State-flow edges:** supplements call relationships with shared-state read/write dependencies. The ablation in the paper shows a modest F1 improvement of `+0.027` when state-flow edges are included.
+- **Imbalance-aware learning:** uses focal loss (`γ = 3.0`) with class weighting to focus training on difficult examples. Across five seeds, focal loss improves recall over weighted cross-entropy; the F1 difference is not statistically significant.
+- **Hard-negative fine-tuning:** adds a subsequent fine-tuning stage using a small pool of Curated training graphs, additional Wild graphs, and hand-crafted Solidity examples.
+- **Uncertainty estimation:** performs 30 stochastic MC Dropout forward passes and uses the standard deviation of the vulnerable-class probability as an uncertainty signal.
+- **Source-line explanations:** uses GNNExplainer feature and edge masks, then maps node importance to Solidity source-line locations.
 
 ## Methodology
 
-The proposed framework consists of the following stages.
+### 1. Graph Construction
 
-### 1. Solidity Parsing and Feature Extraction
+Solidity contracts are parsed using Slither. Each function becomes a node in a directed graph.
 
-Smart contracts are analyzed using Slither to extract function-level information and structural properties.
+Two edge types are constructed:
 
-Each function is represented using 12 engineered features:
+- **Call edges:** added when a function calls another function in the same contract.
+- **State-flow edges:** added between distinct functions when one writes a state variable that the other reads. This is a lightweight shared-state dependency heuristic; it is not a full statement-level data-flow graph.
 
-| Feature | Description |
-|---|---|
-| LOC | Number of control-flow graph nodes in the function |
-| Parameters | Number of function parameters |
-| External Calls | Number of external calls |
-| Sends ETH | Whether the function sends Ether |
-| Visibility | Whether the function is public |
-| Is Modifier | Modifier indicator |
-| State Variables Read | Number of state variables accessed |
-| State Variables Written | Number of state variables modified |
-| Is Payable | Whether the function is payable |
-| Cyclomatic Complexity | Approximation based on branching and loop nodes |
-| Self-Destruct | Whether the function invokes self-destruct |
-| Has Modifier | Whether the function uses modifiers |
+### 2. Node Features
 
-### 2. Graph Construction
+Each function is represented by a 12-dimensional feature vector:
 
-Each smart contract is represented as a graph where nodes correspond to individual Solidity functions.
+1. Lines of code (LOC)
+2. Number of parameters
+3. Number of external calls
+4. Whether the function sends Ether
+5. Visibility indicator
+6. Whether the function is a modifier
+7. Number of state variables read
+8. Number of state variables written
+9. Whether the function is payable
+10. Cyclomatic complexity
+11. Whether the function calls `selfdestruct`
+12. Whether the function uses a modifier
 
-Two types of edges are constructed:
+Continuous features are min-max normalised per graph during graph construction.
 
-- **Call Edges:** Capture relationships between functions based on function invocations.
-- **State-Flow Edges:** Capture dependencies between functions based on shared state-variable access, connecting functions that write to and read from the same state variables.
+### 3. Labelling and Datasets
 
-The resulting graphs are converted into PyTorch Geometric data structures.
+- **SmartBugs Wild:** Slither detector outputs are mapped to source lines and used to create function-level pseudo-labels.
+- **SmartBugs Curated:** manually annotated vulnerability lines are mapped to functions to create the evaluation labels.
 
-Each graph contains:
-- Node feature matrix.
-- Combined edge index.
-- Edge-type information distinguishing call and state-flow relationships.
-- Function-level vulnerability labels.
-- Function names and source-line mappings for explainability.
+The graph-construction run reported 8,111 successfully parsed Wild graphs and 121 successfully parsed Curated contracts, containing 1,392 function nodes.
 
-### 3. Graph Neural Network Architecture
+The six vulnerability categories are reentrancy, unchecked low-level calls, time manipulation, bad randomness, access control, and denial of service.
 
-Two graph neural network architectures are implemented and evaluated:
+### 4. Model and Training
 
-- Graph Convolutional Network (GCN)
-- GraphSAGE
+The primary model is a three-layer GraphSAGE network with a hidden dimension of 64, batch normalisation, dropout, and a two-layer MLP node classifier. A GCN implementation is also included as a baseline.
 
-Both architectures use three graph convolution layers with batch normalization, ReLU activations, and dropout.
+Focal loss with `γ = 3.0` and a safe-to-vulnerable class-weight ratio of `1:12` is used for the main Wild-trained model. Training uses Adam, early stopping, and a Wild validation split.
 
-The final model configuration uses GraphSAGE to learn function representations by aggregating information from neighboring nodes.
+A hard-negative fine-tuning stage follows pre-training. Fine-tuned results are evaluated on a stratified 30% held-out split of SmartBugs Curated; the remaining Curated graphs are included in the fine-tuning pool. Consequently, the fine-tuned result should be interpreted as performance on this held-out Curated split, not as zero-shot performance on the entire independent Curated benchmark.
 
-### 4. Training and Optimization
+### 5. Uncertainty and Explainability
 
-The training pipeline incorporates:
+At inference time, dropout remains active for 30 forward passes. The mean vulnerable-class probability is used for prediction, while the standard deviation across passes provides an epistemic-uncertainty signal.
 
-- **Focal Loss:** Addresses class imbalance by assigning greater importance to difficult classification examples.
-- **Class Weighting:** Increases the contribution of vulnerable samples during training.
-- **Early Stopping:** Monitors validation loss to prevent unnecessary training.
-- **Learning-Rate Scheduling:** Uses ReduceLROnPlateau to adjust the learning rate.
-- **Hard-Negative Fine-Tuning:** Further trains the selected GraphSAGE model using a hard-negative training pool.
-
-The final GraphSAGE configuration uses focal loss with gamma = 3.0 and a vulnerable-class weight of 12.0.
-
-### 5. Uncertainty Estimation
-
-Monte Carlo Dropout is used to estimate predictive uncertainty.
-
-Multiple stochastic forward passes are performed with dropout enabled during inference.
-
-The mean prediction probabilities are used to obtain the final predictions, while the standard deviation of vulnerability-class probabilities provides an estimate of predictive uncertainty.
-
-The implementation uses 30 stochastic forward passes by default.
-
-### 6. Explainability
-
-GNNExplainer is integrated to investigate the model's predictions.
-
-The framework generates:
-
-- Node feature importance scores.
-- Edge importance scores.
-- Source-code line attribution heatmaps.
-- Graph visualizations highlighting influential relationships.
-
-These explanations help identify which function characteristics and structural dependencies contribute to vulnerability predictions.
-
-## Dataset
-
-The project uses the following SmartBugs datasets:
-
-| Dataset | Purpose | Size |
-|---|---|---:|
-| SmartBugs Wild | Training and graph construction | 8,111 parsed graphs |
-| SmartBugs Curated | Held-out benchmark evaluation | 121 graphs |
-
-The datasets are processed to extract Solidity functions, construct graph representations, and generate vulnerability labels.
-
-The SmartBugs Wild dataset uses pseudo-labels, while the Curated benchmark provides the evaluation data.
-
-Dataset preparation and preprocessing are implemented within the research notebook.
+GNNExplainer produces node-feature and edge-importance masks. The notebook maps node-importance scores to Solidity source-line locations using source mappings extracted during parsing. These explanations are illustrative audit aids; they have not been validated through a user study with security auditors.
 
 ## Experimental Results
 
-### Model Performance
+The following results are reported in the accompanying research paper. F1, precision, and recall refer to the vulnerable (positive) function class.
 
-The proposed approach achieves a reported five-seed average F1-score of: **0.605 ± 0.115**
+| Configuration | F1 | Precision | Recall |
+|---|---:|---:|---:|
+| Weighted cross-entropy baseline | 0.292 | 0.209 | 0.484 |
+| Slither static-analysis baseline | 0.500 | 0.401 | 0.665 |
+| GCN + focal loss (5-seed mean) | 0.184 ± 0.020 | 0.127 ± 0.012 | 0.330 ± 0.045 |
+| GraphSAGE + focal loss, zero-shot | 0.284 | 0.183 | 0.634 |
+| GraphSAGE + focal loss + MC Dropout, zero-shot | 0.312 | 0.215 | 0.571 |
+| Hard-negative fine-tuning, no MC Dropout (5-seed mean) | 0.484 ± 0.109 | 0.462 ± 0.172 | 0.576 ± 0.096 |
+| **Hard-negative fine-tuning + MC Dropout (5-seed mean)** | **0.605 ± 0.115** | **0.580 ± 0.157** | **0.662 ± 0.050** |
 
-The reported Slither baseline F1-score is 0.500 on the full Curated benchmark set.
+**Best reported configuration:** fine-tuned GraphSAGE + focal loss + MC Dropout, with F1 `0.605 ± 0.115` on the held-out 30% Curated split.
 
-### Ablation Study
+### Additional Findings
 
-An ablation study investigates the contribution of state-flow edges to graph representation learning.
+- **Focal loss:** across five seeds, mean recall was `0.653 ± 0.018` for focal loss versus `0.480 ± 0.048` for weighted cross-entropy. The recall difference was statistically significant (`p = 0.0004`); the F1 difference was not (`p = 0.310`).
+- **State-flow edge ablation:** on the matched Curated-only ablation split, F1 was `0.233` with state-flow edges and `0.206` without them (`+0.027`). The paper notes that this is a modest result and was not tested for statistical significance.
+- **Precision-recall performance:** the fine-tuned model achieved an AUC-PR of `0.701` on the held-out 30% Curated split.
+- **Uncertainty behaviour:** the paper reports the expected qualitative pattern of lower MC Dropout variance for predictions near 0 or 1 and higher variance for mid-range predictions. The relationship between uncertainty and misclassification has not yet been established.
+- **Explainability example:** the paper analyses a reentrancy-flagged `withdraw()` function in the FibonacciBalance contract. The feature-importance example is illustrative and should not be interpreted as an aggregate ranking across the dataset.
 
-Integrating state-flow edges alongside function-call edges produces a **+0.027 improvement in F1-score** compared with using function-call edges alone.
+**Evaluation note:** the zero-shot configurations are evaluated on the full 121-contract Curated set. Fine-tuned configurations are evaluated only on the held-out 30% split, because the other Curated graphs participate in fine-tuning. The fine-tuned score is therefore not directly comparable to a fully untouched, full-benchmark zero-shot result. The Slither baseline is reported separately as a benchmark reference.
 
-This demonstrates the value of incorporating state-variable dependencies when modeling smart contract behavior.
+## Known Limitations
 
-### Evaluation Protocol
-
-The notebook includes multiple evaluation settings:
-
-- Zero-shot evaluation on the full 121-graph Curated benchmark.
-- Evaluation on a held-out 30% Curated split (37 graphs).
-- Before-and-after comparisons for hard-negative fine-tuning.
-- Deterministic and MC Dropout-based predictions.
-
-The fine-tuned model is evaluated on the held-out Curated split, as the remaining Curated training graphs are incorporated into the fine-tuning pool.
-
-### Visualizations
-
-The following figures are generated by the research notebook and illustrate different aspects of model performance and explainability.
-
-#### 1. Precision-Recall Curve
-
-![Precision-Recall Curve](results/auc_pr_curve.png)
-
-#### 2. Uncertainty Estimation
-
-![Uncertainty Histogram](results/uncertainty_histogram.png)
-
-#### 3. Prediction Confidence
-
-![Confidence Scatter](results/confidence_scatter.png)
-
-#### 4. State-Flow Graph Analysis
-
-![State Flow Degree Distribution](results/state_flow_degree.png)
-
-#### 5. Feature Importance
-
-![Feature Importance](results/feature_importance.png)
-
-#### 6. Source-Code Line Attribution
-
-![Source Line Heatmap](results/line_heatmap.png)
-
-#### 7. Graph Edge Importance
-
-![Edge Importance Graph](results/edge_importance_graph.png)
+- **Pseudo-label noise:** Slither-based labels on Wild may contain false positives and false negatives.
+- **Solidity-version coverage:** 6,889 of the 15,000 candidate Wild contracts were skipped during graph construction, including contracts that could not be parsed or used unsupported Solidity versions.
+- **Rare categories:** some vulnerability categories have very few positive examples in the Curated evaluation split, making per-class metrics unstable.
+- **Modest state-flow contribution:** the measured F1 improvement from adding state-flow edges is small (`+0.027`) and needs further evaluation on larger datasets.
+- **Uncertainty calibration:** MC Dropout uncertainty scores have not been formally calibrated, and their relationship with prediction errors has not been quantified.
+- **Scope of detection:** vulnerabilities outside the six selected categories and Slither detector coverage, such as logic bugs and oracle manipulation, remain untested.
+- **Explainability validation:** source-line heatmaps are illustrative explanations; their usefulness and impact on auditor performance have not been evaluated in a controlled user study.
+- **Baseline comparison:** a direct BugSweeper comparison was not performed because a public implementation was unavailable and the benchmark differs.
 
 ## Repository Structure
 
@@ -209,14 +128,6 @@ The following figures are generated by the research notebook and illustrate diff
 smart-contract-vuln-detection/
 │
 ├── GRAPHite_vuln_detection.ipynb
-│   # Complete research implementation
-│   # Solidity parsing and feature extraction
-│   # Graph construction and dataset preprocessing
-│   # GCN and GraphSAGE model definitions
-│   # Training, focal loss and hard-negative fine-tuning
-│   # MC Dropout uncertainty estimation
-│   # Model evaluation and ablation studies
-│   # GNNExplainer and result visualization
 │
 ├── paper/
 │   └── ICCIS_2026_Paper.pdf    
@@ -235,85 +146,26 @@ smart-contract-vuln-detection/
 └── README.md
 ```
 
-## Installation and Usage
+## Running the Notebook
 
-### 1. Clone the Repository
+The notebook is designed for Google Colab with GPU acceleration. It downloads or clones the required SmartBugs datasets and uses Slither and Solidity compiler tooling during parsing.
 
-```bash
-git clone https://github.com/smruthi-bs/smart-contract-vuln-detection.git
+1. Open the notebook in Google Colab.
+2. Select a runtime with GPU acceleration if available.
+3. Install the Python dependencies listed in `requirements.txt` and the Solidity compiler tooling required by the notebook.
+4. Run the notebook cells in order, ensuring the dataset download and parsing steps complete successfully.
 
-cd smart-contract-vuln-detection
-```
+Exact package and compiler versions may need to be adjusted for the Colab runtime. The notebook installs Solidity compiler version `0.4.25` in its setup cell; graph parsing also attempts to install compiler versions specified by individual contracts.
 
-### 2. Install Dependencies
+## Future Work
 
-```bash
-pip install -r requirements.txt
-```
-
-For GPU execution, ensure that the installed PyTorch and PyTorch Geometric versions are compatible with your CUDA environment.
-
-### 3. Install Solidity Compiler
-
-The notebook uses Solidity compiler versions 0.4.22 and 0.4.25.
-
-Install the required compiler versions using:
-
-```bash
-solc-select install 0.4.22
-solc-select install 0.4.25
-```
-
-The notebook also uses `py-solc-x` to install and manage compiler versions programmatically.
-
-### 4. Open the Research Notebook
-
-Launch Jupyter Notebook:
-
-```bash
-jupyter notebook
-```
-
-Open:
-
-```text
-GRAPHite_vuln_detection.ipynb
-```
-
-Alternatively, the notebook can be uploaded and executed in Google Colab.
-
-### 5. Run the Implementation
-
-Execute the notebook cells sequentially.
-
-The notebook contains the complete implementation, including:
-
-1. Dataset preparation and downloading.
-2. Solidity parsing and feature extraction.
-3. Graph construction and preprocessing.
-4. GCN and GraphSAGE model definitions.
-5. Model training and evaluation.
-6. Focal loss and hard-negative fine-tuning.
-7. MC Dropout uncertainty estimation.
-8. Ablation studies and statistical analysis.
-9. GNNExplainer integration and visualization.
-
-**Note:** Dataset preparation can involve long-running operations, particularly pseudo-label generation and graph construction. Preprocessed dataset files can be used to skip these steps when available.
-
-## Technologies Used
-
-| Category | Technologies |
-|---|---|
-| Programming Language | Python |
-| Smart Contract Analysis | Solidity, Slither |
-| Deep Learning | PyTorch |
-| Graph Learning | PyTorch Geometric |
-| Graph Architectures | GCN, GraphSAGE |
-| Optimization | Focal Loss, Class Weighting, Hard-Negative Fine-Tuning |
-| Explainable AI | GNNExplainer |
-| Uncertainty Estimation | Monte Carlo Dropout |
-| Evaluation | Scikit-learn, SciPy |
-| Visualization | Matplotlib, Seaborn, NetworkX |
+- Evaluate per-vulnerability-category performance on larger and more representative test sets.
+- Calibrate MC Dropout uncertainty, for example using temperature scaling or conformal prediction.
+- Expand Solidity compiler-version coverage and improve parsing success.
+- Investigate additional graph signals and evaluate state-flow edges on larger benchmarks.
+- Explore unsupervised anomaly detection and extension to other EVM-compatible chains.
+- Conduct a controlled study to assess whether source-line explanations help auditors.
+- Reproduce or benchmark against function-level graph approaches such as BugSweeper when a comparable implementation and benchmark are available.
 
 ## Research Presentation & Publication
 
@@ -338,9 +190,11 @@ The conference proceedings are scheduled to be published in **Springer's Lecture
 The accepted and presented version of the research paper is available in the paper/ directory.
 
 The final published version and official citation details will be updated once the conference proceedings are released.
+
 ## Acknowledgements
 
 We acknowledge the SmartBugs benchmark datasets and the open-source tools and libraries that supported the development and evaluation of this research.
+
 
 ---
 

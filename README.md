@@ -30,7 +30,7 @@ The framework additionally incorporates uncertainty estimation and explainabilit
 - **Imbalance-aware learning:** uses focal loss (`γ = 3.0`) with class weighting to focus training on difficult examples. Across five seeds, focal loss improves recall over weighted cross-entropy; the F1 difference is not statistically significant.
 - **Hard-negative fine-tuning:** adds a subsequent fine-tuning stage using a small pool of Curated training graphs, additional Wild graphs, and hand-crafted Solidity examples.
 - **Uncertainty estimation:** performs 30 stochastic MC Dropout forward passes and uses the standard deviation of the vulnerable-class probability as an uncertainty signal.
-- **Source-line explanations:** uses GNNExplainer feature and edge masks, then maps node importance to Solidity source-line locations.
+- **Source-line explanations:** uses GNNExplainer feature and edge masks, then projects function-level node importance onto the Solidity source lines of each function.
 
 ## Methodology
 
@@ -47,12 +47,12 @@ Two edge types are constructed:
 
 Each function is represented by a 12-dimensional feature vector:
 
-1. Lines of code (LOC)
+1. Number of control-flow-graph nodes (size proxy)
 2. Number of parameters
 3. Number of external calls
 4. Whether the function sends Ether
-5. Visibility indicator
-6. Whether the function is a modifier
+5. Whether the function is public
+6. Modifier-declaration indicator (constant at function level)
 7. Number of state variables read
 8. Number of state variables written
 9. Whether the function is payable
@@ -60,11 +60,11 @@ Each function is represented by a 12-dimensional feature vector:
 11. Whether the function calls `selfdestruct`
 12. Whether the function uses a modifier
 
-Continuous features are min-max normalised per graph during graph construction.
+Features are used as raw values (no normalisation).
 
 ### 3. Labelling and Datasets
 
-- **SmartBugs Wild:** Slither detector outputs are mapped to source lines and used to create function-level pseudo-labels.
+- **SmartBugs Wild:** a large collection of Ethereum contracts from Etherscan (15,000 were processed). Slither detector outputs are mapped to source lines and used to create function-level pseudo-labels.
 - **SmartBugs Curated:** manually annotated vulnerability lines are mapped to functions to create the evaluation labels.
 
 The graph-construction run reported 8,111 successfully parsed Wild graphs and 121 successfully parsed Curated contracts, containing 1,392 function nodes.
@@ -73,31 +73,36 @@ The six vulnerability categories are reentrancy, unchecked low-level calls, time
 
 ### 4. Model and Training
 
-The primary model is a three-layer GraphSAGE network with a hidden dimension of 64, batch normalisation, dropout, and a two-layer MLP node classifier. A GCN implementation is also included as a baseline.
+The primary model is a three-layer GraphSAGE network with a hidden dimension of 64 (12→64→64→2), batch normalisation and dropout after the first two layers, and a log-softmax output. There is no separate classifier head. A GCN of the same depth and width is included as a baseline.
 
 Focal loss with `γ = 3.0` and a safe-to-vulnerable class-weight ratio of `1:12` is used for the main Wild-trained model. Training uses Adam, early stopping, and a Wild validation split.
 
-A hard-negative fine-tuning stage follows pre-training. Fine-tuned results are evaluated on a stratified 30% held-out split of SmartBugs Curated; the remaining Curated graphs are included in the fine-tuning pool. Consequently, the fine-tuned result should be interpreted as performance on this held-out Curated split, not as zero-shot performance on the entire independent Curated benchmark.
+Pre-training also uses weight decay 5e-4 and a ReduceLROnPlateau scheduler.
+
+A hard-negative fine-tuning stage follows pre-training (15 epochs, lr 3e-4, weight decay 1e-4, weighted cross-entropy with class weights 1:3, one optimiser step per graph). Fine-tuned results are evaluated on a stratified 30% held-out split of SmartBugs Curated; the remaining Curated graphs are included in the fine-tuning pool. Consequently, the fine-tuned result should be interpreted as performance on this held-out Curated split, not as zero-shot performance on the entire independent Curated benchmark.
 
 ### 5. Uncertainty and Explainability
 
-At inference time, dropout remains active for 30 forward passes. The mean vulnerable-class probability is used for prediction, while the standard deviation across passes provides an epistemic-uncertainty signal.
+Dropout is applied unconditionally in the model's forward pass, so the "no-MC" configurations are a single stochastic pass (T=1), not deterministic predictions. For MC Dropout, 30 forward passes are run. The mean vulnerable-class probability is used for prediction, while the standard deviation across passes provides an epistemic-uncertainty signal.
 
-GNNExplainer produces node-feature and edge-importance masks. The notebook maps node-importance scores to Solidity source-line locations using source mappings extracted during parsing. These explanations are illustrative audit aids; they have not been validated through a user study with security auditors.
+GNNExplainer produces node-feature and edge-importance masks. The notebook projects node-importance scores onto Solidity source lines using source mappings extracted during parsing. Importance is computed per function, so every line of a function receives that function's score; the heatmap does not rank individual statements. These explanations are illustrative audit aids; they have not been validated through a user study with security auditors.
 
 ## Experimental Results
 
 The following results are reported in the accompanying research paper. F1, precision, and recall refer to the vulnerable (positive) function class.
 
-| Configuration | F1 | Precision | Recall |
-|---|---:|---:|---:|
-| Weighted cross-entropy baseline | 0.292 | 0.209 | 0.484 |
-| Slither static-analysis baseline | 0.500 | 0.401 | 0.665 |
-| GCN + focal loss (5-seed mean) | 0.184 ± 0.020 | 0.127 ± 0.012 | 0.330 ± 0.045 |
-| GraphSAGE + focal loss, zero-shot | 0.284 | 0.183 | 0.634 |
-| GraphSAGE + focal loss + MC Dropout, zero-shot | 0.312 | 0.215 | 0.571 |
-| Hard-negative fine-tuning, no MC Dropout (5-seed mean) | 0.484 ± 0.109 | 0.462 ± 0.172 | 0.576 ± 0.096 |
-| **Hard-negative fine-tuning + MC Dropout (5-seed mean)** | **0.605 ± 0.115** | **0.580 ± 0.157** | **0.662 ± 0.050** |
+| Configuration | Evaluation set | F1 | Precision | Recall |
+|---|---|---:|---:|---:|
+| Weighted cross-entropy baseline (single run) | Full (121) | 0.292 | 0.209 | 0.484 |
+| Slither static-analysis baseline | Full (121) | 0.500 | 0.401 | 0.665 |
+| GCN + weighted CE (5-seed mean) | Full (121) | 0.184 ± 0.020 | 0.127 ± 0.012 | 0.330 ± 0.045 |
+| GraphSAGE + focal loss, zero-shot (single pass) | Full (121) | 0.284 | 0.183 | 0.634 |
+| GraphSAGE + focal loss + MC Dropout, zero-shot | Full (121) | 0.312 | 0.215 | 0.571 |
+| Fine-tuned, single pass (5-seed mean) | Held-out (37) | 0.484 ± 0.109 | 0.462 ± 0.172 | 0.576 ± 0.096 |
+| **Fine-tuned + MC Dropout (5-seed mean)** | **Held-out (37)** | **0.605 ± 0.115** | **0.580 ± 0.157** | **0.662 ± 0.050** |
+| Curated-only training, upper bound (5-seed mean) | Held-out (25) | 0.468 ± 0.220 | 0.360 ± 0.205 | 0.860 ± 0.041 |
+
+Evaluation sets: Full = all 121 parsed Curated graphs; Held-out (37) = stratified 30% split; Held-out (25) = 20% split.
 
 **Best reported configuration:** fine-tuned GraphSAGE + focal loss + MC Dropout, with F1 `0.605 ± 0.115` on the held-out 30% Curated split.
 
@@ -105,11 +110,12 @@ The following results are reported in the accompanying research paper. F1, preci
 
 - **Focal loss:** across five seeds, mean recall was `0.653 ± 0.018` for focal loss versus `0.480 ± 0.048` for weighted cross-entropy. The recall difference was statistically significant (`p = 0.0004`); the F1 difference was not (`p = 0.310`).
 - **State-flow edge ablation:** on the matched Curated-only ablation split, F1 was `0.233` with state-flow edges and `0.206` without them (`+0.027`). The paper notes that this is a modest result and was not tested for statistical significance.
-- **Precision-recall performance:** the fine-tuned model achieved an AUC-PR of `0.701` on the held-out 30% Curated split.
+- **Precision-recall performance:** the seed-42 fine-tuned model achieved an AUC-PR of `0.701` on the held-out 30% Curated split. That checkpoint's epoch was selected by F1 on the same held-out split, so this value (and the per-class and explainability results) is optimistic; the five-seed results use the final epoch.
+- **Matched comparison:** on the seed-42 held-out split, the zero-shot model with MC Dropout scores F1 `0.406` versus `0.647` after fine-tuning with MC Dropout.
 - **Uncertainty behaviour:** the paper reports the expected qualitative pattern of lower MC Dropout variance for predictions near 0 or 1 and higher variance for mid-range predictions. The relationship between uncertainty and misclassification has not yet been established.
 - **Explainability example:** the paper analyses a reentrancy-flagged `withdraw()` function in the FibonacciBalance contract. The feature-importance example is illustrative and should not be interpreted as an aggregate ranking across the dataset.
 
-**Evaluation note:** the zero-shot configurations are evaluated on the full 121-contract Curated set. Fine-tuned configurations are evaluated only on the held-out 30% split, because the other Curated graphs participate in fine-tuning. The fine-tuned score is therefore not directly comparable to a fully untouched, full-benchmark zero-shot result. The Slither baseline is reported separately as a benchmark reference.
+**Evaluation note:** the zero-shot configurations are evaluated on the full 121-contract Curated set. Fine-tuned configurations are evaluated only on the held-out 30% split, because the other Curated graphs participate in fine-tuning. The fine-tuned score is therefore not directly comparable to a fully untouched, full-benchmark zero-shot result. The Slither baseline is reported separately as a benchmark reference. The weighted-CE baseline and zero-shot GraphSAGE are single runs. The Curated-only reference is trained from scratch on Curated alone.
 
 ## Known Limitations
 
@@ -120,6 +126,8 @@ The following results are reported in the accompanying research paper. F1, preci
 - **Uncertainty calibration:** MC Dropout uncertainty scores have not been formally calibrated, and their relationship with prediction errors has not been quantified.
 - **Scope of detection:** vulnerabilities outside the six selected categories and Slither detector coverage, such as logic bugs and oracle manipulation, remain untested.
 - **Explainability validation:** source-line heatmaps are illustrative explanations; their usefulness and impact on auditor performance have not been evaluated in a controlled user study.
+- **Checkpoint and hyperparameter selection:** the class weight and focal gamma were chosen using zero-shot Curated results, and the AUC-PR, per-class and explainability results use a checkpoint chosen by held-out F1.
+- **Single-pass "no-MC" rows:** because dropout is always active, these rows are single stochastic passes; a deterministic-inference comparison has not been run.
 - **Baseline comparison:** a direct BugSweeper comparison was not performed because a public implementation was unavailable and the benchmark differs.
 
 ## Repository Structure
@@ -130,7 +138,7 @@ smart-contract-vuln-detection/
 ├── GRAPHite_vuln_detection.ipynb
 │
 ├── paper/
-│   └── ICCIS_2026_Paper.pdf    
+│   └── GNN-Based Function-Level Vulnerability.pdf
 │
 ├── results/
 │   ├── auc_pr_curve.png
